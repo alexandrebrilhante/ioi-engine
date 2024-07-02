@@ -19,5 +19,5 @@ curl --header "Content-Type: application/json" \
               "symbol": "TSLA",
               "side": "B",
               "ioi_shares": 100000}' \
-     http:/0.0.0.0:8000/api/submit
+     http:/0.0.0.0:8000/api/v1/ioi/submit
 ```

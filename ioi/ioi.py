@@ -3,74 +3,58 @@ from os import environ
 from typing import Callable, Dict, Optional
 from uuid import uuid1
 
-import simplefix
 from fastapi import FastAPI
 from pydantic import BaseModel
+from redis import Redis
+from redis.commands.json.path import Path
+from simplefix import FixMessage
+
+from ioi.constants import FIX_TAGS
 
 app = FastAPI()
-
-FIX_TAGS: Dict[str, int] = {
-    "ioi_id": 23,
-    "ioi_trans_type": 28,
-    "ioi_ref_id": 26,
-    "symbol": 55,
-    "no_underlyings": 711,
-    "side": 54,
-    "qty_type": 854,
-    "ioi_qty": 27,
-    "currency": 15,
-    "no_legs": 555,
-    "price_type": 423,
-    "price": 44,
-    "valid_until_time": 62,
-    "ioi_qlty_ind": 25,
-    "ioi_natural_flag": 130,
-    "no_ioi_qualifiers": 199,
-    "text": 58,
-    "encoded_text_len": 354,
-    "encoded_text": 355,
-    "transact_time": 60,
-    "url_link": 149,
-    "no_routing_ids": 215,
-    "routing_type": 216,
-    "routing_id": 217,
-    "checksum": 10,
-}
+r = Redis(host=environ["REDIS_SERVER"], port=6379, db=0)
 
 
 class IOI(BaseModel):
-    ioi_id: str
+    """
+    Represents an Indication of Interest (IOI) message.
+
+    Attributes:
+        ioi_id (str): The unique identifier for the IOI, if any.
+        ioi_trans_type (str): The type of IOI transaction.
+        ioi_ref_id (str | None): The reference identifier for the IOI, if any.
+        symbol (str): The symbol of the instrument.
+        side (str): The side of the IOI (buy or sell).
+        ioi_qty (str): The quantity of the instrument.
+        price (str): The price of the instrument.
+        checksum (str): The checksum value for the IOI.
+    """
+
+    ioi_id: str | None
     ioi_trans_type: str
     ioi_ref_id: str | None
     symbol: str
-    no_underlyings: str | None
     side: str
-    qty_type: str | None
     ioi_qty: str
-    currency: str | None
-    no_legs: str | None
-    price_type: str | None
-    price: str | None
-    valid_until_time: str | None
-    ioi_qlty_ind: str | None
-    ioi_natural_flag: str | None
-    no_ioi_qualifiers: str | None
-    text: str | None
-    encoded_text_len: str | None
-    encoded_text: str | None
-    transact_time: str | None
-    url_link: str | None
-    no_routing_ids: str | None
-    routing_type: str | None
-    routing_id: str | None
+    price: str
     checksum: str
 
 
 class IndicationOfInterest:
-    def __init__(self, **kwargs) -> None:
-        self.message = simplefix.FixMessage()
+    """
+    Represents an Indication of Interest (IOI) message.
 
-        self.set_headers()
+    Args:
+        **kwargs: Keyword arguments representing the IOI message fields.
+
+    Attributes:
+        message (simplefix.FixMessage): The FIX message object representing the IOI.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        self.message = FixMessage()
+
+        self._set_headers()
 
         for key, value in kwargs.items():
             if key in self.FIX_TAGS:
@@ -80,6 +64,9 @@ class IndicationOfInterest:
             self.message.append_pair(10, environ["CHECKSUM"])
 
     def _set_headers(self) -> None:
+        """
+        Sets the header fields of the IOI message.
+        """
         self.message.append_pair(8, "FIX.4.4", header=True)
         self.message.append_pair(35, 6, header=True)
         self.message.append_pair(49, environ["SENDER"], header=True)
@@ -88,41 +75,94 @@ class IndicationOfInterest:
         self.message.append_time(52, header=True)
 
     def _send(self) -> bytes:
+        """
+        Sends the IOI message over a TCP socket.
+
+        Returns:
+            bytes: The encoded IOI message.
+        """
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((environ["HOST"], environ["PORT"]))
             s.sendall(self.message.encode())
 
     def submit(self) -> Callable:
+        """
+        Submits the IOI message.
+
+        Returns:
+            Callable: A function that sends the IOI message.
+        """
         assert (
             self.message["symbol"] is not None
             and self.message["side"] is not None
             and self.message["ioi_qty"] is not None
         ), "Symbol, side, and IOI quantity are required..."
 
-        self.message.append_pair(26, str(uuid1()))
+        i = str(uuid1())
+
+        self.message.append_pair(23, i)
+        self.message.append_pair(26, i)
         self.message.append_pair(28, "N")
+
+        r.json().set(f"ioi:{i}", Path.root_path(), self.message.to_string())
 
         return self._send()
 
     def replace(self) -> Callable:
-        assert self.message["ioi_ref_id"] is not None, "IOI ref ID required..."
+        """
+        Replaces an existing IOI message.
 
-        self.message.append_pair(26, self.message["ioi_ref_id"])
-        self.message.append_pair(28, "R")
+        Returns:
+            Callable: A function that sends the replaced IOI message.
+        """
+        ioi_ref_id = self.message["ioi_ref_id"]
 
-        return self._send()
+        assert ioi_ref_id is not None, "IOI ref ID required..."
+
+        if r.exists(f"ioi:{ioi_ref_id}"):
+            self.message.append_pair(26, self.message["ioi_ref_id"])
+            self.message.append_pair(28, "R")
+
+            r.json().set(
+                f"ioi:{ioi_ref_id}", Path.root_path(), self.message.to_string()
+            )
+
+            return self._send()
 
     def cancel(self) -> Callable:
-        assert self.message["ioi_ref_id"] is not None, "IOI ref ID required..."
+        """
+        Cancels an existing IOI message.
 
-        self.message.append_pair(26, self.message["ioi_ref_id"])
-        self.message.append_pair(28, "C")
+        Returns:
+            Callable: A function that sends the canceled IOI message.
+        """
+        ioi_ref_id = self.message["ioi_ref_id"]
 
-        return self._send()
+        assert ioi_ref_id is not None, "IOI ref ID required..."
+
+        if r.exists(f"ioi:{ioi_ref_id}"):
+            self.message.append_pair(26, ioi_ref_id)
+            self.message.append_pair(28, "C")
+
+            r.json().set(
+                f"ioi:{ioi_ref_id}", Path.root_path(), self.message.to_string()
+            )
+
+            return self._send()
 
 
 @app.get("/api/v1/ioi/submit")
 def submit(tags: Dict[str, Optional[int | str]]):
+    """
+    Submit an indication of interest.
+
+    Args:
+        tags (Dict[str, Optional[int | str]]): A dictionary containing the tags for the indication of interest.
+
+    Returns:
+        Dict[str, str]: A dictionary with the status of the submission.
+
+    """
     ioi = IndicationOfInterest(tags)
     ioi.submit()
 
@@ -131,6 +171,15 @@ def submit(tags: Dict[str, Optional[int | str]]):
 
 @app.get("/api/v1/ioi/replace")
 def replace(tags: Dict[str, Optional[int | str]]):
+    """
+    Replaces the indication of interest (IOI) based on the provided tags.
+
+    Args:
+        tags (Dict[str, Optional[int | str]]): A dictionary containing the tags for the IOI.
+
+    Returns:
+        dict: A dictionary with the status of the replacement operation.
+    """
     ioi = IndicationOfInterest(tags)
     ioi.replace()
 
@@ -139,6 +188,16 @@ def replace(tags: Dict[str, Optional[int | str]]):
 
 @app.get("/api/v1/ioi/cancel")
 def cancel(tags: Dict[str, Optional[int | str]]):
+    """
+    Cancel an indication of interest (IOI) based on the provided tags.
+
+    Args:
+        tags (Dict[str, Optional[int | str]]): A dictionary containing the tags for the IOI.
+
+    Returns:
+        dict: A dictionary with the status of the cancellation.
+
+    """
     ioi = IndicationOfInterest(tags)
     ioi.cancel()
 
