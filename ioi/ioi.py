@@ -1,4 +1,5 @@
 import socket
+from json import dumps
 from os import environ
 from typing import Callable, Dict, Optional
 from uuid import uuid1
@@ -40,7 +41,7 @@ class IOI(BaseModel):
     checksum: str
 
 
-class IndicationOfInterest:
+class IndicationOfInterest(FixMessage):
     """
     Represents an Indication of Interest (IOI) message.
 
@@ -62,6 +63,9 @@ class IndicationOfInterest:
 
         if "checksum" not in kwargs:
             self.message.append_pair(10, environ["CHECKSUM"])
+
+    def __str__(self) -> str:
+        return self.message.to_string()
 
     def _set_headers(self) -> None:
         """
@@ -166,7 +170,7 @@ def submit(tags: Dict[str, Optional[int | str]]):
     ioi = IndicationOfInterest(tags)
     ioi.submit()
 
-    return {"status": "submitted"}
+    return {"ioi": ioi.to_string()}
 
 
 @app.get("/api/v1/ioi/replace")
@@ -183,7 +187,7 @@ def replace(tags: Dict[str, Optional[int | str]]):
     ioi = IndicationOfInterest(tags)
     ioi.replace()
 
-    return {"status": "replaced"}
+    return {"ioi": ioi.to_string()}
 
 
 @app.get("/api/v1/ioi/cancel")
@@ -201,4 +205,16 @@ def cancel(tags: Dict[str, Optional[int | str]]):
     ioi = IndicationOfInterest(tags)
     ioi.cancel()
 
-    return {"status": "cancelled"}
+    return {"ioi": ioi.to_string()}
+
+
+@app.get("/api/v1/ioi/list")
+def list():
+    keys = []
+
+    for key in r.scan_iter("ioi:*"):
+        keys.extend(r.json().get(key))
+
+    keys = [key.decode("utf-8") for key in keys]
+
+    return {"keys": dumps({"keys": keys}, indent=2)}
