@@ -32,7 +32,7 @@ class IOI(BaseModel):
     """
 
     ioi_id: str | None
-    ioi_trans_type: str
+    ioi_trans_type: str | None
     ioi_ref_id: str | None
     symbol: str
     side: str
@@ -102,10 +102,12 @@ class IndicationOfInterest(FixMessage):
             and self.message["ioi_qty"] is not None
         ), "Symbol, side, and IOI quantity are required..."
 
-        i = str(uuid1())
+        if self.message["ioi_id"] is None:
+            i = str(uuid1())
 
-        self.message.append_pair(23, i)
-        self.message.append_pair(26, i)
+            self.message.append_pair(23, i)
+            self.message.append_pair(26, i)
+
         self.message.append_pair(28, "N")
 
         r.json().set(f"ioi:{i}", Path.root_path(), self.message.to_string())
@@ -155,7 +157,7 @@ class IndicationOfInterest(FixMessage):
             return self._send()
 
 
-@app.get("/api/v1/ioi/submit")
+@app.post("/api/v1/ioi/submit")
 def submit(tags: Dict[str, Optional[int | str]]):
     """
     Submit an indication of interest.
@@ -173,7 +175,7 @@ def submit(tags: Dict[str, Optional[int | str]]):
     return {"ioi": ioi.to_string()}
 
 
-@app.get("/api/v1/ioi/replace")
+@app.post("/api/v1/ioi/replace")
 def replace(tags: Dict[str, Optional[int | str]]):
     """
     Replaces the indication of interest (IOI) based on the provided tags.
@@ -190,7 +192,7 @@ def replace(tags: Dict[str, Optional[int | str]]):
     return {"ioi": ioi.to_string()}
 
 
-@app.get("/api/v1/ioi/cancel")
+@app.post("/api/v1/ioi/cancel")
 def cancel(tags: Dict[str, Optional[int | str]]):
     """
     Cancel an indication of interest (IOI) based on the provided tags.
@@ -217,4 +219,4 @@ def list():
 
     keys = [key.decode("utf-8") for key in keys]
 
-    return {"keys": dumps({"keys": keys}, indent=2)}
+    return {"ioi": dumps({"keys": keys}, indent=2)}

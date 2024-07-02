@@ -4,20 +4,27 @@ In the FIX (Financial Information eXchange) protocol, *indications of interest* 
 
 IOIs are used to gauge market interest between brokers and clients  without committing to a trade and typically includes details like security identifier, side (buy/sell), quantity, and price (optional).
 
-This project aims to provide a simple API to be able to automate IOI management.
+This project aims to provide a simple API to be able to automate IOI management bundled with a Redis cache.
 
 ## Usage
 ```bash
-fastapi dev ioi/ioi.py
+fastapi run ioi/ioi.py
 ```
 
+### Submit
 ```bash
 curl --header "Content-Type: application/json" \
      --request POST \
-     --data '{"ioi_id": "1",
-              "ioi_trans_type": "N",
-              "symbol": "TSLA",
+     --data '{"symbol": "TSLA",
               "side": "B",
-              "ioi_shares": 100000}' \
-     http:/0.0.0.0:8000/api/v1/ioi/submit
+              "ioi_shares": 100000,
+              "price": 420.69}' \
+     http:/localhost:8000/api/v1/ioi/submit
+```
+
+### List
+```bash
+curl --header "Content-Type: application/json" \
+     --request GET \
+     http:/localhost:8000/api/v1/ioi/list
 ```
